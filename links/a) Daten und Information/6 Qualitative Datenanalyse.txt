@@ -1,8 +1,0 @@
-https://api.cast.switch.ch/p/106/sp/10600/playManifest/entryId/0_1p2rwm2j/format/url/protocol/https
-https://api.cast.switch.ch/p/106/sp/10600/playManifest/entryId/0_tdc3vvxy/format/url/protocol/https
-https://api.cast.switch.ch/p/106/sp/10600/playManifest/entryId/0_wduoypp7/format/url/protocol/https
-https://api.cast.switch.ch/p/106/sp/10600/playManifest/entryId/0_0tv0dou7/format/url/protocol/https
-https://api.cast.switch.ch/p/106/sp/10600/playManifest/entryId/0_yw3yod55/format/url/protocol/https
-https://api.cast.switch.ch/p/106/sp/10600/playManifest/entryId/0_2vebzax9/format/url/protocol/https
-https://api.cast.switch.ch/p/106/sp/10600/playManifest/entryId/0_ynhwhfvr/format/url/protocol/https
-https://api.cast.switch.ch/p/106/sp/10600/playManifest/entryId/0_a44xcx0p/format/url/protocol/https

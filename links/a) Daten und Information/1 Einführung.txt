@@ -1,2 +1,0 @@
-https://api.cast.switch.ch/p/106/sp/10600/playManifest/entryId/0_e9jl0tyz/format/url/protocol/https
-https://api.cast.switch.ch/p/106/sp/10600/playManifest/entryId/0_sxk1tb6p/format/url/protocol/https
