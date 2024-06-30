@@ -1,71 +1,42 @@
-"""
-Script Name: transcription.py
-
-Zweck des Skripts:
-Dieses Skript dient zur parallelen Transkription von MP4-Dateien im Ordner "Downloads" mittels der Whisper API.
-Die parallele Verarbeitung erfolgt mit Hilfe der Bibliotheken "dask" und "concurrent.futures", um eine effiziente und schnelle
-Verarbeitung der Dateien zu gewährleisten. Die Transkriptionen werden in einer Ordnerstruktur gespeichert, die der Struktur im
-"Downloads" Ordner entspricht, und sowohl als .txt als auch .docx Dateien gespeichert.
-
-Hauptfunktionen und -methoden:
-- find_mp4_files: Sucht alle MP4-Dateien im angegebenen Verzeichnis.
-- transcribe_mp4: Führt die Transkription einer einzelnen MP4-Datei durch.
-- save_transcription: Speichert die Transkription im gewünschten Format und Verzeichnis.
-- parallel_transcription: Verarbeitet alle gefundenen MP4-Dateien parallel.
-
-Übersicht über den Ablauf des Skripts:
-1. Importieren der benötigten Bibliotheken.
-2. Definieren der Funktion zum Finden von MP4-Dateien.
-3. Definieren der Funktion zur Transkription einer MP4-Datei.
-4. Definieren der Funktion zum Speichern der Transkription.
-5. Definieren der Funktion zur parallelen Verarbeitung der Transkriptionen.
-6. Aufrufen der Hauptfunktion zur Ausführung des Skripts.
-
-Hinweise auf spezielle Implementierungsentscheidungen oder Sicherheitsaspekte:
-- Die Verwendung von "dask" und "concurrent.futures" gewährleistet eine effiziente Parallelverarbeitung.
-- Typannotationen und umfassende Fehlerbehandlung erhöhen die Robustheit und Lesbarkeit des Codes.
-- Die Transkriptionen werden in einer Ordnerstruktur gespeichert, die der Struktur im "Downloads" Ordner entspricht.
-- Die Transkriptionen berücksichtigen Anglizismen und versuchen, diese korrekt zu transkribieren.
-"""
-
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List
-import whisper
+import asyncio
 import logging
+import time
+import warnings
 
-from dask.dataframe.io.tests.test_sql import db
+from tqdm.asyncio import tqdm
+import whisper
 from docx import Document
-import moviepy.editor as mp
 import re
+import aiofiles
+from concurrent.futures import ProcessPoolExecutor
+from typing import List
+from convert_2_audio import convert_mp4_to_wav
+
+# Suppress specific warnings
+warnings.filterwarnings("ignore", message="FP16 is not supported on CPU; using FP32 instead")
 
 # Logging configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def find_mp4_files(directory: str) -> List[str]:
-    """
-    Find all MP4 files in the specified directory and its subdirectories.
+MAX_WORKERS = 6  # Adjusted number of workers to balance performance and system load
+BATCH_SIZE = 10  # Process files in smaller batches
+CPU_THRESHOLD = 80  # CPU usage percentage threshold
+MEMORY_THRESHOLD = 80  # Memory usage percentage threshold
 
-    :param directory: The directory to search for MP4 files.
-    :return: A list of paths to MP4 files.
-    """
-    mp4_files = [os.path.join(root, file)
-                 for root, _, files in os.walk(directory)
-                 for file in files if file.endswith('.mp4')]
-    logging.info(f"Found {len(mp4_files)} MP4 files.")
-    return mp4_files
 
-def extract_audio_from_video(file_path: str) -> str:
+def monitor_system_resources() -> bool:
     """
-    Extract audio from the given MP4 file and save it as a temporary WAV file.
+    Monitor the system's CPU and memory usage.
 
-    :param file_path: Path to the MP4 file.
-    :return: Path to the extracted audio WAV file.
+    :return: True if the system is under the threshold, False otherwise.
     """
-    video = mp.VideoFileClip(file_path)
-    audio_path = file_path.replace('.mp4', '.wav')
-    video.audio.write_audiofile(audio_path)
-    return audio_path
+    import psutil
+    cpu_usage = psutil.cpu_percent(interval=1)
+    memory_usage = psutil.virtual_memory().percent
+    logging.info(f"CPU usage: {cpu_usage}%, Memory usage: {memory_usage}%")
+    return cpu_usage < CPU_THRESHOLD and memory_usage < MEMORY_THRESHOLD
+
 
 def clean_transcription(text: str) -> str:
     """
@@ -80,44 +51,59 @@ def clean_transcription(text: str) -> str:
     logging.info("Cleaned transcription text.")
     return text
 
-def transcribe_mp4(file_path: str) -> str:
-    """
-    Transcribe the given MP4 file using Whisper API.
 
-    :param file_path: Path to the MP4 file.
+def transcribe_wav_sync(file_path: str) -> str:
+    """
+    Transcribe the given WAV file using Whisper API synchronously.
+
+    :param file_path: Path to the WAV file.
     :return: The transcription result as a string.
     """
     try:
-        audio_path = extract_audio_from_video(file_path)
-        model = whisper.load_model("base")
-        result = model.transcribe(audio_path)
+        model = whisper.load_model("small", device="cpu", fp16=False)  # Use a smaller model for faster transcription
+        result = model.transcribe(file_path)
         transcription = result['text']
         transcription = clean_transcription(transcription)
-        os.remove(audio_path)  # Clean up the temporary audio file
         logging.info(f"Transcription completed for {file_path}.")
         return transcription
     except Exception as e:
         logging.error(f"Error transcribing {file_path}: {e}")
         return ""
 
-def save_transcription(file_path: str, transcription: str, base_directory: str) -> None:
+
+async def transcribe_wav(file_path: str, executor: ProcessPoolExecutor) -> str:
+    """
+    Asynchronously transcribe the given WAV file using Whisper API.
+
+    :param file_path: Path to the WAV file.
+    :param executor: Process pool executor for parallel processing.
+    :return: The transcription result as a string.
+    """
+    loop = asyncio.get_event_loop()
+    transcription = await loop.run_in_executor(executor, transcribe_wav_sync, file_path)
+    return transcription
+
+
+async def save_transcription(file_path: str, transcription: str, base_directory: str,
+                             original_base_directory: str) -> None:
     """
     Save the transcription to a .txt and .docx file in a structured directory.
 
-    :param file_path: Path to the original MP4 file.
+    :param file_path: Path to the original WAV file.
     :param transcription: The transcription text.
     :param base_directory: The base directory to save the transcriptions.
+    :param original_base_directory: The original base directory of the MP4 files.
     """
-    relative_path = os.path.relpath(file_path, base_directory)
-    transcription_path = os.path.join(base_directory, 'transcriptions', os.path.splitext(relative_path)[0])
+    relative_path = os.path.relpath(file_path, original_base_directory)
+    transcription_path = os.path.join(base_directory, os.path.splitext(relative_path)[0])
 
     os.makedirs(transcription_path, exist_ok=True)
 
     txt_file = os.path.join(transcription_path, 'transcription.txt')
     docx_file = os.path.join(transcription_path, 'transcription.docx')
 
-    with open(txt_file, 'w', encoding='utf-8') as f:
-        f.write(transcription)
+    async with aiofiles.open(txt_file, 'w', encoding='utf-8') as f:
+        await f.write(transcription)
 
     doc = Document()
     doc.add_heading('Transcription', 0)
@@ -126,39 +112,58 @@ def save_transcription(file_path: str, transcription: str, base_directory: str) 
 
     logging.info(f"Transcription saved to {txt_file} and {docx_file}.")
 
-def parallel_transcription(mp4_files: List[str], base_directory: str, max_workers: int = 8) -> None:
-    """
-    Transcribe MP4 files in parallel and save the transcriptions.
 
-    :param mp4_files: List of paths to MP4 files.
+async def transcribe_audio_files(wav_files: List[str], base_directory: str, original_base_directory: str,
+                                 max_workers: int) -> None:
+    """
+    Transcribe audio files in parallel and save the transcriptions.
+
+    :param wav_files: List of paths to WAV files.
     :param base_directory: The base directory to save the transcriptions.
+    :param original_base_directory: The original base directory of the MP4 files.
     :param max_workers: Maximum number of parallel workers.
     """
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_file = {executor.submit(transcribe_mp4, file): file for file in mp4_files}
-        for future in as_completed(future_to_file):
-            file = future_to_file[future]
-            try:
-                transcription = future.result()
-                if transcription:
-                    save_transcription(file, transcription, base_directory)
-            except Exception as e:
-                logging.error(f"Error processing file {file}: {e}")
+    executor = ProcessPoolExecutor(max_workers=max_workers)
+    tasks = []
 
-def main():
+    for i in range(0, len(wav_files), BATCH_SIZE):
+        batch = wav_files[i:i + BATCH_SIZE]
+
+        for file_path in batch:
+            # Monitor system resources before starting each task
+            while not monitor_system_resources():
+                logging.warning("High system usage detected. Waiting to continue...")
+                await asyncio.sleep(5)  # Wait before rechecking the system resources
+
+            tasks.append(transcribe_wav(file_path, executor))
+
+        results = await tqdm.gather(*tasks, desc="Transcribing audio", total=len(tasks))
+
+        for file_path, transcription in zip(batch, results):
+            if transcription:
+                await save_transcription(file_path, transcription, base_directory, original_base_directory)
+
+        tasks.clear()  # Clear tasks after each batch to free up resources
+        await asyncio.sleep(1)  # Shorter delay between batches to keep the system responsive
+
+
+async def main():
     """
-    Main function to find and transcribe MP4 files in parallel.
+    Main function to find and process MP4 files in parallel.
     """
-    directory = os.path.expanduser("~/Downloads")
-    mp4_files = find_mp4_files(directory)
+    directory = "videos"
+    base_transcription_directory = "transcriptions"
+    audio_directory = "audios"
 
-    # Using dask bag to parallelize the transcription task
-    bag = db.from_sequence(mp4_files).map(transcribe_mp4)
-    transcriptions = bag.compute()
+    # Step 1: Convert MP4 files to WAV
+    wav_files = await convert_mp4_to_wav(directory, audio_directory)
 
-    # Save transcriptions
-    for file, transcription in zip(mp4_files, transcriptions):
-        save_transcription(file, transcription, directory)
+    # Step 2: Transcribe the extracted audio files
+    await transcribe_audio_files(wav_files, base_transcription_directory, audio_directory, MAX_WORKERS)
+
 
 if __name__ == "__main__":
-    main()
+    start_time = time.time()
+    asyncio.run(main())
+    end_time = time.time()
+    logging.info(f"Total time taken: {end_time - start_time:.2f} seconds")

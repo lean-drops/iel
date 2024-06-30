@@ -9,7 +9,7 @@ import subprocess
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-MAX_WORKERS = 100  # Maximale Anzahl der Threads für parallele Downloads
+MAX_WORKERS = 100  # Maximale Anzahl der Threads für parallele videos
 
 
 def download_video(url, audio_download_path, counter):
@@ -104,7 +104,7 @@ def process_directory(source_directory, download_directory):
 if __name__ == "__main__":
     # Define source and download directories
     source_directory = "/Users/python/Python Projekte/Studium Digitale/links"
-    download_directory = "/Users/python/Python Projekte/Studium Digitale/Downloads"
+    download_directory = "/Users/python/Python Projekte/Studium Digitale/videos"
 
     # Process directories and download videos
     process_directory(source_directory, download_directory)
