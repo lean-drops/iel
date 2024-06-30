@@ -1,24 +1,3 @@
-"""
-Zweck des Skripts:
-Dieses Skript durchsucht rekursiv eine gegebene Verzeichnisstruktur, extrahiert Video-URLs aus HTML-Dateien und speichert diese in gut organisierten Ausgabeverzeichnissen.
-Jede HTML-Datei wird parallel verarbeitet, um die Effizienz zu maximieren. Die Video-URLs werden in Textdateien gespeichert, die nach den Namen der HTML-Dateien benannt sind.
-
-Hauptfunktionen und -methoden:
-- extract_video_urls_from_file: Extrahiert Video-URLs aus einer gegebenen HTML-Datei.
-- process_html_files: Durchsucht rekursiv die Verzeichnisstruktur, extrahiert Video-URLs und speichert sie in entsprechenden Verzeichnissen.
-- main: Einstiegspunkt des Skripts, definiert Quell- und Zielverzeichnisse und startet die Verarbeitung.
-
-Übersicht über den Ablauf des Skripts:
-1. Das Skript durchsucht rekursiv das Quellverzeichnis nach HTML-Dateien.
-2. Jede gefundene HTML-Datei wird parallel verarbeitet, um Video-URLs zu extrahieren.
-3. Die extrahierten URLs werden in Textdateien im Zielverzeichnis gespeichert, wobei die Verzeichnisstruktur beibehalten wird.
-
-Hinweise auf spezielle Implementierungsentscheidungen oder Sicherheitsaspekte:
-- Es wird sichergestellt, dass die Ausgabeverzeichnisse erstellt werden, falls sie noch nicht existieren.
-- Es wird Typannotationen verwendet, um die Lesbarkeit und Fehlersicherheit zu erhöhen.
-- Die parallele Verarbeitung erfolgt mit dask und concurrent.futures, um die Effizienz zu maximieren.
-"""
-
 import os
 import re
 import json
@@ -91,11 +70,12 @@ def process_file(html_file: str, source_directory: str, output_directory: str) -
     lesson_directory = os.path.join(output_directory, os.path.dirname(relative_path))
     os.makedirs(lesson_directory, exist_ok=True)
     video_urls = extract_video_urls_from_file(html_file)
-    for i, url in enumerate(video_urls):
-        output_file = os.path.join(lesson_directory, f"video_{i + 1}.txt")
+
+    if video_urls:
+        output_file = os.path.join(lesson_directory, os.path.splitext(os.path.basename(html_file))[0] + '.txt')
         with open(output_file, 'w', encoding='utf-8') as file:
-            file.write(url + '\n')
-        logging.info(f"Video-URL gespeichert in {output_file}.")
+            file.write('\n'.join(video_urls) + '\n')
+        logging.info(f"Video-URLs gespeichert in {output_file}.")
 
 def process_html_files(source_directory: str, output_directory: str) -> None:
     """
